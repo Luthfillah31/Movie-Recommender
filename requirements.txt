@@ -1,0 +1,9 @@
+streamlit
+os
+re
+pandas
+langchain_pinecone
+langchain_huggingface
+langchain_openai
+langchain.chains
+langchain.prompts
