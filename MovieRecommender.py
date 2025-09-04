@@ -180,7 +180,7 @@ try:
             embedding=embeddings
         )
         llm = ChatOpenAI(
-            model_name="mistralai/mistral-small-3.2-24b-instruct:free",
+            model_name="qwen/qwen3-4b:free",
             openai_api_key=openrouter_api_key,
             openai_api_base="https://openrouter.ai/api/v1",
             temperature=0.7,
