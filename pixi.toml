@@ -1,0 +1,13 @@
+[workspace]
+authors = ["Luthfi <luthfillahatar@gmail.com>"]
+channels = ["conda-forge"]
+name = "Movie Recommender"
+platforms = ["win-64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
+ipykernel = ">=7.2.0,<8"
+requests = ">=2.34.2,<3"
+aiohttp = ">=3.13.5,<4"

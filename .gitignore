@@ -1,3 +1,6 @@
-# .gitignore
+.streamlit/secrets.toml 
+.pixi/*
+!.pixi/config.toml
+*.ipynb
+*.csv
 
-.streamlit/secrets.toml
