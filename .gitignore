@@ -3,4 +3,5 @@
 !.pixi/config.toml
 *.ipynb
 *.csv
+.env
 
