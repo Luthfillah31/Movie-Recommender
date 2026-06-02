@@ -64,7 +64,7 @@ if __name__ == "__main__":
     
     test_vectors = [
         {
-            "id": "integration-test-001",
+            "id": "test-1",
             "values": [0.01] * 768,
             "sparse_values": {"indices": [1, 2], "values": [0.5, 0.8]},
             "metadata": {
