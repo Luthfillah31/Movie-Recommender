@@ -1,5 +1,8 @@
 import logging
 import sys
+from pathlib import Path
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from plugins.extract import run_historical_seed
 from plugins.transform import transform_data
@@ -17,7 +20,8 @@ def main():
             logger.warning("Extraction yielded no data. Aborting seed operation.")
             sys.exit(0)
             
-        vectors = transform_data(raw_movies)
+
+        vectors = transform_data(raw_movies, is_seed=True)
         if not vectors:
             logger.warning("Transformation yielded empty vector payload. Aborting.")
             sys.exit(0)

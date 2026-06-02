@@ -1,5 +1,8 @@
 import logging
 import sys
+from pathlib import Path
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from plugins.extract import run_daily_update
 from plugins.transform import transform_data

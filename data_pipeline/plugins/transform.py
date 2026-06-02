@@ -111,23 +111,26 @@ async def generate_dense_vectors(texts: List[str]) -> List[List[float]]:
         return await asyncio.gather(*tasks)
 
 
-def generate_sparse_vectors(texts: List[str]) -> List[Dict[str, Any]]:
+def generate_sparse_vectors(texts: List[str], is_seed: bool = False) -> List[Dict[str, Any]]:
     """
-    Generates BM25 keyword vectors for exact-match searching (Sparse).
+    Generates BM25 keyword vectors. 
+    Fits and saves the model if seeding; loads the model if updating.
     """
-    logger.info("Generating keyword (sparse) vectors using BM25...")
     bm25 = BM25Encoder()
+    bm25_path = "bm25_model.json"
     
-    # In a massive enterprise system, you would load a pre-fit bm25.json file here.
-    # For a daily delta pipeline, fitting it on the daily batch + historical data works perfectly.
-    bm25.fit(texts)
+    if is_seed or not os.path.exists(bm25_path):
+        logger.info("Fitting new BM25 model on corpus and saving state...")
+        bm25.fit(texts)
+        bm25.dump(bm25_path)
+    else:
+        logger.info("Loading pre-fit BM25 model for incremental update...")
+        bm25.load(bm25_path)
     
-    # encode_documents returns a dict: {"indices": [1, 5, 20], "values": [0.5, 1.2, 0.8]}
-    sparse_vectors = bm25.encode_documents(texts)
-    return sparse_vectors
+    return bm25.encode_documents(texts)
 
 
-def transform_data(raw_movies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def transform_data(raw_movies: List[Dict[str, Any]], is_seed: bool = False) -> List[Dict[str, Any]]:
     """
     The main orchestrator. Takes raw TMDB JSON and outputs Pinecone-ready Hybrid Vectors.
     """
@@ -138,7 +141,6 @@ def transform_data(raw_movies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     if not OPENROUTER_API_KEY:
         raise ValueError("OPENROUTER_API_KEY is missing from environment.")
 
-    # 1. Clean Data & Format Text
     cleaned_data = []
     for movie in raw_movies:
         formatted = clean_and_format_movie(movie)
@@ -147,13 +149,10 @@ def transform_data(raw_movies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             
     texts = [item["text_to_embed"] for item in cleaned_data]
 
-    # 2. Generate Sparse (Keyword) Vectors synchronously
-    sparse_vectors = generate_sparse_vectors(texts)
+    sparse_vectors = generate_sparse_vectors(texts, is_seed=is_seed)
 
-    # 3. Generate Dense (Semantic) Vectors asynchronously
     dense_vectors = asyncio.run(generate_dense_vectors(texts))
 
-    # 4. Assemble the final payload for Pinecone Upsert
     pinecone_payload = []
     for i in range(len(cleaned_data)):
         record = {
@@ -169,7 +168,6 @@ def transform_data(raw_movies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 if __name__ == "__main__":
-    # Local Testing Block
     sample_raw_movies = [
         {
             "id": 155, 
