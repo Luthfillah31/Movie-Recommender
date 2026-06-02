@@ -14,8 +14,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-# Nomic-embed-text is highly optimized for RAG, cheap, and available on OpenRouter
-EMBEDDING_MODEL = "nomic-ai/nomic-embed-text-v1.5"
+EMBEDDING_MODEL = "perplexity/pplx-embed-v1-0.6b"
 MAX_CONCURRENT_EMBEDDINGS = 20
 
 
@@ -32,11 +31,9 @@ def clean_and_format_movie(raw_movie: Dict[str, Any]) -> Optional[Dict[str, Any]
         year = release_date.split("-")[0] if release_date else "Unknown Year"
         poster_path = raw_movie.get("poster_path", "")
         
-        # Extract Genres
         genres = [g.get("name") for g in raw_movie.get("genres", [])]
         genre_str = ", ".join(genres)
         
-        # Extract Director and Top 3 Cast members from the appended credits
         credits = raw_movie.get("credits", {})
         crew = credits.get("crew", [])
         cast = credits.get("cast", [])
@@ -44,10 +41,9 @@ def clean_and_format_movie(raw_movie: Dict[str, Any]) -> Optional[Dict[str, Any]
         directors = [member["name"] for member in crew if member.get("job") == "Director"]
         director_str = ", ".join(directors) if directors else "Unknown Director"
         
-        top_cast = [member["name"] for member in cast[:3]]
+        top_cast = [member["name"] for member in cast[:10]]
         cast_str = ", ".join(top_cast) if top_cast else "Unknown Cast"
 
-        # The "Rich Chunk" - This is what the AI actually reads and embeds
         text_to_embed = (
             f"Title: {title} ({year}). "
             f"Genres: {genre_str}. "
@@ -56,7 +52,7 @@ def clean_and_format_movie(raw_movie: Dict[str, Any]) -> Optional[Dict[str, Any]
             f"Synopsis: {overview}"
         )
 
-        # We keep the metadata separated for Streamlit to use later
+        
         metadata = {
             "title": title,
             "year": year,
@@ -64,7 +60,7 @@ def clean_and_format_movie(raw_movie: Dict[str, Any]) -> Optional[Dict[str, Any]
             "director": director_str,
             "cast": cast_str,
             "poster_path": poster_path,
-            "text": text_to_embed  # Crucial for the LLM to read during generation
+            "text": text_to_embed  
         }
 
         return {
