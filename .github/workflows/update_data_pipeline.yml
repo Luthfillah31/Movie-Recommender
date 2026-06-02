@@ -1,0 +1,29 @@
+name: Nightly TMDB to Pinecone ETL
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  run-daily-delta:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🛎️ Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Pixi Environment
+        uses: prefix-dev/setup-pixi@v0.8.1
+        with:
+          pixi-version: v0.39.0
+          cache: true 
+
+      - name: 🚀 Execute Daily Delta Pipeline
+        env:
+          TMDB_API_TOKEN: ${{ secrets.TMDB_API_TOKEN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+          PINECONE_INDEX_NAME: movie-recommender
+        run: |
+          pixi run python data_pipeline/scripts/run_daily.py
