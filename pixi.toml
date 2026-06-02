@@ -11,3 +11,10 @@ version = "0.1.0"
 ipykernel = ">=7.2.0,<8"
 requests = ">=2.34.2,<3"
 aiohttp = ">=3.13.5,<4"
+tenacity = ">=9.1.4,<10"
+python = "3.11.*"
+
+[pypi-dependencies]
+dotenv = ">=0.9.9, <0.10"
+pinecone = ">=9.0.1, <10"
+pinecone-text = ">=0.11.0, <0.12"
