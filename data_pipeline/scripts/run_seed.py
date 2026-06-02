@@ -15,7 +15,7 @@ def main():
     logger.info("Initiating historical database seed.")
     
     try:
-        raw_movies = run_historical_seed(pages=20)
+        raw_movies = run_historical_seed(pages=500)
         if not raw_movies:
             logger.warning("Extraction yielded no data. Aborting seed operation.")
             sys.exit(0)
@@ -26,8 +26,12 @@ def main():
             logger.warning("Transformation yielded empty vector payload. Aborting.")
             sys.exit(0)
             
-        load_to_pinecone(vectors)
-        logger.info("Historical seed operation completed successfully.")
+        success = load_to_pinecone(vectors)
+        if success:
+            logger.info("Historical seed operation completed successfully.")
+        else:
+            logger.error("Seed operation aborted due to Pinecone load failure.")
+            sys.exit(1)
         
     except Exception as e:
         logger.error(f"Seed operation failed: {e}", exc_info=True)

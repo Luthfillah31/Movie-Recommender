@@ -1,8 +1,7 @@
 import os
 import logging
 import asyncio
-from typing import List, Dict, Any, Tuple
-
+from typing import List, Dict, Any, Tuple, Optional
 import aiohttp
 from tenacity import retry, wait_exponential, stop_after_attempt
 from pinecone_text.sparse import BM25Encoder
@@ -29,7 +28,7 @@ def clean_and_format_movie(raw_movie: Dict[str, Any]) -> Optional[Dict[str, Any]
         overview = raw_movie.get("overview", "")
         release_date = raw_movie.get("release_date", "")
         year = release_date.split("-")[0] if release_date else "Unknown Year"
-        poster_path = raw_movie.get("poster_path", "")
+        poster_path = raw_movie.get("poster_path") or ""
         
         genres = [g.get("name") for g in raw_movie.get("genres", [])]
         genre_str = ", ".join(genres)
