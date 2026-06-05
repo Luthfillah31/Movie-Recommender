@@ -95,7 +95,8 @@ async def fetch_movie_details(session: aiohttp.ClientSession, movie_ids: List[in
     async def bounded_fetch(movie_id: int) -> Optional[Dict[str, Any]]:
         async with semaphore:
             url = f"{TMDB_BASE_URL}/movie/{movie_id}"
-            params = {"append_to_response": "credits,keywords"}
+            params = {"append_to_res"
+            "ponse": "credits,keywords"}
             try:
                 return await _fetch_json(session, url, params=params)
             except Exception as e:

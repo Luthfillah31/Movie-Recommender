@@ -19,7 +19,7 @@ jobs:
           pixi-version: v0.39.0
           cache: true 
 
-      - name: 🚀 Execute Daily Delta Pipeline
+      - name: Execute Daily Delta Pipeline
         env:
           TMDB_API_TOKEN: ${{ secrets.TMDB_API_TOKEN }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
