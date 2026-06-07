@@ -4,7 +4,6 @@ import logging
 from typing import List, Dict, Any, Tuple, Optional
 import requests
 import streamlit as st
-import pandas as pd
 from pinecone import Pinecone
 
 # --- LangChain Imports ---
@@ -161,12 +160,10 @@ class OpenRouterEmbeddings(Embeddings):
             raise ValueError(f"OpenRouter Error: {response.text}")
         return response.json()["data"][0]["embedding"]
 
-# --- Core Logic & Caching ---
 @st.cache_resource(show_spinner="Initializing AI Services...")
-def initialize_services() -> Tuple[Pinecone, PineconeVectorStore, ChatOpenAI, pd.DataFrame]:
-    """Idempotent initialization of API clients, Langchain wrappers, and DataFrames."""
+def initialize_services() -> Tuple[Pinecone, PineconeVectorStore, ChatOpenAI]:
+    """Idempotent initialization of API clients and Langchain wrappers."""
     
-    # 1. Secret Validation
     pinecone_key = st.secrets.get("PINECONE_API_KEY")
     openrouter_key = st.secrets.get("OPENROUTER_API_KEY")
     index_name = st.secrets.get("PINECONE_INDEX_NAME", "movie-recommender")
@@ -178,36 +175,28 @@ def initialize_services() -> Tuple[Pinecone, PineconeVectorStore, ChatOpenAI, pd
     os.environ["PINECONE_API_KEY"] = pinecone_key
 
     try:
-        # 2. Raw Pinecone Client (Required for Reranking Inference API)
         pc = Pinecone(api_key=pinecone_key)
-
-        # 3. Langchain Vector Store (Bi-Encoder Retrieval)
         embeddings = OpenRouterEmbeddings(api_key=openrouter_key)
-        
         vectorstore = PineconeVectorStore.from_existing_index(
             index_name=index_name,
             embedding=embeddings
         )
 
-        # 4. Langchain LLM (Generative)
         llm = ChatOpenAI(
             model_name="deepseek/deepseek-v4-flash",
             openai_api_key=openrouter_key,
             openai_api_base="https://openrouter.ai/api/v1",
-            temperature=0.7,
-            max_tokens=500
+            temperature=0.3,
+            max_tokens=10000
         )
 
-        # 5. Metadata Fallback Data
-        df = pd.read_csv('MovieData.csv')
-        
-        return pc, vectorstore, llm, df
+        # Removed the Pandas CSV loading completely!
+        return pc, vectorstore, llm
 
     except Exception as e:
         logger.error(f"Service initialization failed: {e}", exc_info=True)
         st.error(f"Failed to connect to backend services: {e}")
         st.stop()
-
 
 # --- Pipeline Execution Functions ---
 def retrieve_and_rerank(query: str, vectorstore: PineconeVectorStore, pc: Pinecone, top_k: int = 5) -> List[Dict[str, Any]]:
@@ -246,18 +235,17 @@ def retrieve_and_rerank(query: str, vectorstore: PineconeVectorStore, pc: Pineco
     return final_docs
 
 
-def generate_llm_recommendation(query: str, ranked_docs: List[Dict[str, Any]], llm: ChatOpenAI) -> str:
-    """Passes the precision-ranked documents into the LLM context window."""
-    
+def generate_llm_recommendation(query: str, ranked_docs: List[Dict[str, Any]], llm: ChatOpenAI, num_recs: int = 1) -> str:
     template = """
-    You are 'CineMate', a friendly and enthusiastic movie expert chatbot. Your goal is to give excellent, personalized movie recommendations by using the provided movie data to answer the user's request.
+    You are 'CineMate', a friendly and enthusiastic movie expert chatbot. 
+    CRITICAL INSTRUCTION: You MUST provide EXACTLY {num_recs} movie recommendation(s).
 
     **Your Instructions:**
-    1.  Analyze the user's request to understand their taste (genres, actors, directors, themes, etc.).
-    2.  Use the provided **Context from our movie database** to find a movie that is a great match.
-    3.  If you cannot find a good match in the context, say so and suggest that you can search more broadly if they'd like.
-    4.  **Crucially, DO NOT spoil major plot twists or endings.**
-    5.  Present your recommendation in the exact structured format below.
+    1. Analyze the user's request.
+    2. Use the provided **Context from our movie database** to find the best matches.
+    3. Crucially, DO NOT spoil major plot twists or endings.
+    4. You MUST separate every single movie recommendation with this exact string on its own line: ---SPLIT---
+    5. Present EACH recommendation in the exact structured format below.
 
     **Context from our movie database:**
     {context}
@@ -265,27 +253,20 @@ def generate_llm_recommendation(query: str, ranked_docs: List[Dict[str, Any]], l
     **User's Request:**
     {question}
 
-    **Your Recommendation:**
-    
-    **ID**: [Movie ID]
+    **FORMAT SHOULD LOOKS LIKE THIS (Repeat EXACTLY {num_recs} times, separated by ---SPLIT---):**
     
     **Movie:** [Movie Title] ([Year])
+    **Logline:** [A compelling, one-sentence hook]
 
-    **Logline:** [A compelling, one-sentence hook to grab their attention, extracted from the context.]
+    **Synopsis:** [A brief, 2-3 sentence summary of the plot]
 
-    **Synopsis:** [A brief, 2-3 sentence summary of the plot without giving too much away, extracted from the context.]
-
-    **Why You'll Like It:** [Directly connect the movie to the user's stated preferences from their request.]
-
+    **Why You'll Like It:** [Directly connect the movie to the user's stated preferences]
     **Details:**
     * **Genre:** [Primary Genre(s)]
     * **Director:** [Director's Name]
     * **Starring:** [Lead Actor(s)]
-
-    [Ask a follow-up question to keep the conversation going.]
     """
     
-    # Compile the highly-relevant context string
     context_blocks = []
     for doc in ranked_docs:
         title = doc["metadata"].get("title", "Unknown Title")
@@ -293,77 +274,93 @@ def generate_llm_recommendation(query: str, ranked_docs: List[Dict[str, Any]], l
     context_string = "\n\n".join(context_blocks)
     
     prompt = PromptTemplate.from_template(template).format(
-        context=context_string, 
-        question=query
+        context=context_string, question=query, num_recs=num_recs
     )
     
-    # Execute generation
     response = llm.invoke(prompt)
     return response.content
 
-
-def get_movie_poster(movie_id: str, df: pd.DataFrame) -> Optional[str]:
-    """Fetches a movie poster URL using the Pandas lookup fallback."""
-    if not movie_id:
+def get_movie_poster(title: str) -> Optional[str]:
+    """Fetches a movie poster URL directly from the Pinecone metadata saved in memory."""
+    if not title:
         return None
-    try:
-        poster_path = df[df['id'] == int(movie_id)]['poster_path'].values[0]
+    # Lookup the exact title generated by the LLM in our cached dictionary
+    poster_path = st.session_state.posters.get(title)
+    if poster_path:
         return f"https://image.tmdb.org/t/p/w500{poster_path}"
-    except Exception as e:
-        logger.warning(f"Could not fetch poster for movie ID {movie_id}: {e}")
-        return None
-
+    return None
 
 # --- App Initialization ---
-pc, vectorstore, llm, df = initialize_services()
+pc, vectorstore, llm = initialize_services() # Removed df
 
 if 'messages' not in st.session_state:
     st.session_state.messages = []
 if 'user_query' not in st.session_state:
     st.session_state.user_query = ""
+if 'posters' not in st.session_state:
+    st.session_state.posters = {}
 
 # --- UI Layout ---
-st.title("CineMate AI Recommender")
-st.markdown("<h5>Tell me what you're in the mood for, and I'll find the perfect movie for you!</h5>", unsafe_allow_html=True)
+st.title("🍿 CineMate AI Recommender")
+st.markdown("<h5 style='text-align: center; color: #E0F2F1; margin-bottom: 2rem;'>Tell me what you're in the mood for, and I'll find the perfect movie!</h5>", unsafe_allow_html=True)
 
 # Example Prompts
-st.markdown("<p style='text-align: center; color: #E0F2F1; font-weight: 300;'>Try one of these prompts or write your own:</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: #9CA3AF; font-size: 0.9rem;'>Try one of these prompts or write your own:</p>", unsafe_allow_html=True)
 col1, col2, col3 = st.columns(3)
 with col1:
-    if st.button("Christian Bale as batman and Heath Ledger as Joker", use_container_width=True):
-        st.session_state.user_query = "Christian Bale as batman and Heath Ledger as Joker"
+    if st.button("A mind-bending thriller by Christopher Nolan", use_container_width=True):
+        st.session_state.user_query = "A mind-bending thriller by Christopher Nolan"
 with col2:
-    if st.button("A funny movie with talking animals", use_container_width=True):
-        st.session_state.user_query = "A funny movie with talking animals"
+    if st.button("An inspiring documentary about marathon runners", use_container_width=True):
+        st.session_state.user_query = "An inspiring documentary about marathon runners"
 with col3:
-    if st.button("A sci-fi movie that makes you think", use_container_width=True):
-        st.session_state.user_query = "A sci-fi movie that makes you think"
+    if st.button("A tense, tactical espionage action movie", use_container_width=True):
+        st.session_state.user_query = "A tense, tactical espionage action movie"
 
 
 # Input Form
 with st.form(key='recommendation_form'):
-    user_query = st.text_input(
-        "Your Movie Preference",
-        value=st.session_state.user_query,
-        placeholder="e.g., 'a mind-bending sci-fi movie with a twist ending'",
-        label_visibility="collapsed"
-    )
+    col1, col2 = st.columns([3, 1]) # 3-to-1 width ratio
+    
+    with col1:
+        user_query = st.text_input(
+            "Your Movie Preference",
+            value=st.session_state.user_query,
+            placeholder="e.g., 'a mind-bending sci-fi movie with a twist ending'",
+            label_visibility="collapsed"
+        )
+    with col2:
+        # Replaced the slider with a clean dropdown box
+        num_recs = st.selectbox(
+            "Recommendations", 
+            options=[1, 2, 3, 4, 5], 
+            index=2, # Default to 3
+            label_visibility="collapsed"
+        )
+        
     submit_button = st.form_submit_button(label='Get Recommendation ✨')
 
 
 # --- Pipeline Execution Trigger ---
 if submit_button and user_query:
-    with st.spinner('Retrieving, Reranking, and Casting... 🍿'):
+    st.session_state.messages = [] 
+    
+    with st.spinner(f'Retrieving, Reranking, and Casting {num_recs} movies... 🍿'):
         try:
-            # 1. Rerank Retrieval
-            ranked_docs = retrieve_and_rerank(user_query, vectorstore, pc, top_k=5)      
-            # 2. LLM Synthesis
+            ranked_docs = retrieve_and_rerank(user_query, vectorstore, pc, top_k=max(10, num_recs * 5))
+            
+            # MEMORY SAVE: Cache the poster paths from Pinecone directly into session state
+            for doc in ranked_docs:
+                title = doc["metadata"].get("title")
+                path = doc["metadata"].get("poster_path")
+                if title and path:
+                    st.session_state.posters[title] = path
+
             if not ranked_docs:
                 recommendation = "Sorry, I couldn't find any relevant movies in our database for that request."
             else:
-                recommendation = generate_llm_recommendation(user_query, ranked_docs, llm)
+                recommendation = generate_llm_recommendation(user_query, ranked_docs, llm, num_recs)
             
-            # 3. State Management
             st.session_state.messages.append({"role": "user", "content": user_query})
             st.session_state.messages.append({"role": "assistant", "content": recommendation})
             st.session_state.user_query = "" 
@@ -376,30 +373,40 @@ if submit_button and user_query:
 # --- Conversation History Render ---
 if st.session_state.messages:
     st.markdown("---")
-    for message in reversed(st.session_state.messages): 
+    for message in st.session_state.messages: 
         if message["role"] == "assistant":
             recommendation_text = message['content']
+            movie_blocks = recommendation_text.split("---SPLIT---")
             
-            # Extract metadata using regex based on the LLM prompt structure
-            title, year, movie_id = None, None, None
-            title_match = re.search(r"\*\*Movie:\*\* (.*?) \((\d{4})\)", recommendation_text)
-            if title_match:
-                title, year = title_match.groups()
+            for block in movie_blocks:
+                if not block.strip():
+                    continue 
+                
+                # Extract the Title directly
+                title, year = None, None
+                title_match = re.search(r"\*\*Movie:\*\* (.*?) \((\d{4})\)", block)
+                if title_match:
+                    title, year = title_match.groups()
+                    title = title.strip() # Ensure clean matching
 
-            id_match = re.search(r"\*\*ID\*\*: (\d+)", recommendation_text)
-            if id_match:
-                movie_id = id_match.group(1)
-
-            # Display Recommendation Card
-            with st.container():
-                st.success("CineMate's Recommendation:")
-                col1, col2 = st.columns([1, 2])
-                with col1:
+                with st.container(border=True):
                     if title and year:
-                        poster_url = get_movie_poster(movie_id, df)
-                        if poster_url:
-                            st.image(poster_url, caption=f"{title} ({year})")
-                        else:
-                            st.info("No poster available.")
-                with col2:
-                    st.markdown(recommendation_text)
+                        st.markdown(f"## 🎬 {title} ({year})")
+                    else:
+                        st.markdown("## 🎬 CineMate's Recommendation")
+                    
+                    st.write("") 
+                    
+                    col1, col2 = st.columns([1, 2.5]) 
+                    with col1:
+                        if title and year:
+                            # Pass the Title to get the Pinecone metadata URL
+                            poster_url = get_movie_poster(title)
+                            if poster_url:
+                                st.image(poster_url, use_column_width=True) 
+                            else:
+                                st.info("No poster available.")
+                    with col2:
+                        # Clean the raw text output to remove the redundant Title line
+                        clean_text = re.sub(r"\*\*Movie:\*\* .*?\(\d{4}\)\n*", "", block)
+                        st.markdown(clean_text)
