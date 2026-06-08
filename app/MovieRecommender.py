@@ -5,8 +5,7 @@ from typing import List, Dict, Any, Tuple, Optional
 import requests
 import streamlit as st
 from pinecone import Pinecone
-
-# --- LangChain Imports ---
+from pinecone_text.sparse import BM25Encoder
 from langchain_pinecone import PineconeVectorStore
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_openai import ChatOpenAI
@@ -175,13 +174,19 @@ def initialize_services() -> Tuple[Pinecone, PineconeVectorStore, ChatOpenAI]:
     os.environ["PINECONE_API_KEY"] = pinecone_key
 
     try:
+        # 2. Raw Pinecone Client
         pc = Pinecone(api_key=pinecone_key)
-        embeddings = OpenRouterEmbeddings(api_key=openrouter_key)
-        vectorstore = PineconeVectorStore.from_existing_index(
-            index_name=index_name,
-            embedding=embeddings
-        )
+        
+        # Initialize the specific Pinecone Index directly
+        index = pc.Index(index_name)
 
+        # 3. Embeddings & BM25 Encoder (The Hybrid Duo)
+        embeddings = OpenRouterEmbeddings(api_key=openrouter_key)
+        
+        bm25 = BM25Encoder()
+        bm25.load("bm25_model.json") # Load your pipeline's keyword vocabulary
+
+        # 4. Langchain LLM (Generative)
         llm = ChatOpenAI(
             model_name="deepseek/deepseek-v4-flash",
             openai_api_key=openrouter_key,
@@ -190,8 +195,8 @@ def initialize_services() -> Tuple[Pinecone, PineconeVectorStore, ChatOpenAI]:
             max_tokens=10000
         )
 
-        # Removed the Pandas CSV loading completely!
-        return pc, vectorstore, llm
+        # Notice we return 'index' and 'bm25' now instead of 'vectorstore'
+        return pc, index, embeddings, bm25, llm
 
     except Exception as e:
         logger.error(f"Service initialization failed: {e}", exc_info=True)
@@ -199,22 +204,34 @@ def initialize_services() -> Tuple[Pinecone, PineconeVectorStore, ChatOpenAI]:
         st.stop()
 
 # --- Pipeline Execution Functions ---
-def retrieve_and_rerank(query: str, vectorstore: PineconeVectorStore, pc: Pinecone, top_k: int = 10) -> List[Dict[str, Any]]:
-    """Executes a broad dense fetch followed by a precision Cross-Encoder rerank."""
+def retrieve_and_rerank(query: str, index: Any, embeddings: OpenRouterEmbeddings, bm25: BM25Encoder, pc: Pinecone, top_k: int = 5) -> List[Dict[str, Any]]:
+    """Executes a 50/50 Hybrid Search followed by a precision Cross-Encoder rerank."""
     
-    # Step 1: Broad Bi-Encoder Fetch (Get top 50 candidates)
-    initial_docs = vectorstore.similarity_search(query, k=100)
+    # Step 1: Generate both Dense and Sparse Vectors for the user's query
+    dense_vec = embeddings.embed_query(query)
+    sparse_vec = bm25.encode_queries(query)
     
-    if not initial_docs:
+    # Step 2: Apply the Hybrid Weighting (0.5 = 50% semantic, 50% keyword)
+    hdense, hsparse = hybrid_scale(dense_vec, sparse_vec, alpha=0.5)
+    
+    # Step 3: Execute Broad Hybrid Fetch (Get top 50 candidates)
+    initial_results = index.query(
+        top_k=50,
+        vector=hdense,
+        sparse_vector=hsparse,
+        include_metadata=True
+    )
+    
+    if not initial_results.matches:
         return []
 
-    # Step 2: Format payload for Pinecone Inference Reranker
+    # Step 4: Format payload for Pinecone Inference Reranker
     documents_payload = [
-        {"id": str(i), "text": doc.page_content, "metadata": doc.metadata} 
-        for i, doc in enumerate(initial_docs)
+        {"id": match.id, "text": match.metadata["text"], "metadata": match.metadata} 
+        for match in initial_results.matches
     ]
     
-    # Step 3: Execute Cross-Encoder Reranking
+    # Step 5: Execute Cross-Encoder Reranking
     reranked_results = pc.inference.rerank(
         model="bge-reranker-v2-m3",
         query=query,
@@ -223,7 +240,7 @@ def retrieve_and_rerank(query: str, vectorstore: PineconeVectorStore, pc: Pineco
         return_documents=True
     )
     
-    # Step 4: Parse final ranked payload
+    # Step 6: Parse final ranked payload
     final_docs = []
     for match in reranked_results.data:
         final_docs.append({
@@ -234,6 +251,20 @@ def retrieve_and_rerank(query: str, vectorstore: PineconeVectorStore, pc: Pineco
         
     return final_docs
 
+def hybrid_scale(dense: List[float], sparse: Dict[str, List[float]], alpha: float):
+    """
+    Scales vectors for hybrid search: 
+    alpha = 1.0 (pure semantic), alpha = 0.0 (pure keyword), alpha = 0.5 (equal blend)
+    """
+    if alpha < 0 or alpha > 1:
+        raise ValueError("Alpha must be between 0 and 1")
+    
+    hsparse = {
+        'indices': sparse['indices'],
+        'values':  [v * (1 - alpha) for v in sparse['values']]
+    }
+    hdense = [v * alpha for v in dense]
+    return hdense, hsparse
 
 def generate_llm_recommendation(query: str, ranked_docs: List[Dict[str, Any]], llm: ChatOpenAI, num_recs: int = 1) -> str:
     template = """
@@ -291,7 +322,7 @@ def get_movie_poster(title: str) -> Optional[str]:
     return None
 
 # --- App Initialization ---
-pc, vectorstore, llm = initialize_services() # Removed df
+pc, index, embeddings, bm25, llm = initialize_services()
 
 if 'messages' not in st.session_state:
     st.session_state.messages = []
@@ -347,8 +378,7 @@ if submit_button and user_query:
     
     with st.spinner(f'Retrieving, Reranking, and Casting {num_recs} movies... 🍿'):
         try:
-            ranked_docs = retrieve_and_rerank(user_query, vectorstore, pc, top_k=max(10, num_recs * 5))
-            
+            ranked_docs = retrieve_and_rerank(user_query, index, embeddings, bm25, pc, top_k=max(10, num_recs * 5))
             # MEMORY SAVE: Cache the poster paths from Pinecone directly into session state
             for doc in ranked_docs:
                 title = doc["metadata"].get("title")
@@ -403,7 +433,7 @@ if st.session_state.messages:
                             # Pass the Title to get the Pinecone metadata URL
                             poster_url = get_movie_poster(title)
                             if poster_url:
-                                st.image(poster_url, use_column_width=True) 
+                                st.image(poster_url, use_container_width=True) 
                             else:
                                 st.info("No poster available.")
                     with col2:
