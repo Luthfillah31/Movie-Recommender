@@ -199,11 +199,11 @@ def initialize_services() -> Tuple[Pinecone, PineconeVectorStore, ChatOpenAI]:
         st.stop()
 
 # --- Pipeline Execution Functions ---
-def retrieve_and_rerank(query: str, vectorstore: PineconeVectorStore, pc: Pinecone, top_k: int = 5) -> List[Dict[str, Any]]:
+def retrieve_and_rerank(query: str, vectorstore: PineconeVectorStore, pc: Pinecone, top_k: int = 10) -> List[Dict[str, Any]]:
     """Executes a broad dense fetch followed by a precision Cross-Encoder rerank."""
     
     # Step 1: Broad Bi-Encoder Fetch (Get top 50 candidates)
-    initial_docs = vectorstore.similarity_search(query, k=50)
+    initial_docs = vectorstore.similarity_search(query, k=100)
     
     if not initial_docs:
         return []
