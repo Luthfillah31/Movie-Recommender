@@ -20,7 +20,7 @@ numpy = "<2"
 [pypi-dependencies]
 python-dotenv = "*"
 pinecone-text = ">=0.11.0, <0.12"
-pinecone-client = "*"
+pinecone = "*"
 langchain = "*"
 langchain-pinecone = "*"
 langchain-openai = "*"
