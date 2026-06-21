@@ -16,12 +16,12 @@ UPSERT_BATCH_SIZE = 100
 
 
 def _chunk_data(data: List[Any], chunk_size: int) -> List[List[Any]]:
-    """Yield successive n-sized chunks from data."""
+    """Split data into list of n-sized chunks."""
     return [data[i:i + chunk_size] for i in range(0, len(data), chunk_size)]
 
 
 def _get_pinecone_index():
-    """Initialize Pinecone client and validate index existence."""
+    """Initialize Pinecone client and ensure the target index exists."""
     if not PINECONE_API_KEY:
         raise ValueError("PINECONE_API_KEY is not configured.")
         
@@ -34,9 +34,7 @@ def _get_pinecone_index():
 
 
 def load_to_pinecone(vectors: List[Dict[str, Any]]) -> bool:
-    """
-    Upserts hybrid vectors into Pinecone using optimal batch sizing.
-    """
+    """Upsert list of hybrid vectors into the Pinecone index in batches."""
     if not vectors:
         logger.warning("Empty vector list provided. Aborting upsert operation.")
         return False
@@ -60,19 +58,4 @@ def load_to_pinecone(vectors: List[Dict[str, Any]]) -> bool:
 
 
 if __name__ == "__main__":
-    logger.info("Running Pinecone load module integration test.")
-    
-    test_vectors = [
-        {
-            "id": "test-1",
-            "values": [0.01] * 768,
-            "sparse_values": {"indices": [1, 2], "values": [0.5, 0.8]},
-            "metadata": {
-                "title": "Pipeline Integration Test",
-                "year": "2026",
-                "text": "Automated test payload for hybrid vector upsert."
-            }
-        }
-    ]
-    
-    # load_to_pinecone(test_vectors)
+    logger.info("Running Pinecone load module verification.")

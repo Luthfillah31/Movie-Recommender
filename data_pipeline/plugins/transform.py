@@ -18,10 +18,7 @@ MAX_CONCURRENT_EMBEDDINGS = 20
 
 
 def clean_and_format_movie(raw_movie: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """
-    Extracts relevant fields from the TMDB JSON and constructs a rich 
-    text chunk for embedding.
-    """
+    """Extract relevant fields from the raw TMDB metadata and construct a text chunk for embedding."""
     try:
         movie_id = str(raw_movie.get("id"))
         title = raw_movie.get("title", "Unknown Title")
@@ -51,7 +48,6 @@ def clean_and_format_movie(raw_movie: Dict[str, Any]) -> Optional[Dict[str, Any]
             f"Synopsis: {overview}"
         )
 
-        
         metadata = {
             "title": title,
             "year": year,
@@ -74,7 +70,7 @@ def clean_and_format_movie(raw_movie: Dict[str, Any]) -> Optional[Dict[str, Any]
 
 @retry(wait=wait_exponential(multiplier=1, min=2, max=10), stop=stop_after_attempt(5))
 async def _fetch_dense_embedding(session: aiohttp.ClientSession, text: str) -> List[float]:
-    """Hits OpenRouter's embedding API asynchronously."""
+    """Generate a dense vector embedding using OpenRouter's API."""
     url = "https://openrouter.ai/api/v1/embeddings"
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -92,7 +88,7 @@ async def _fetch_dense_embedding(session: aiohttp.ClientSession, text: str) -> L
 
 
 async def generate_dense_vectors(texts: List[str]) -> List[List[float]]:
-    """Manages the async batching for OpenRouter semantic embeddings."""
+    """Batch generate semantic dense vector embeddings concurrently."""
     logger.info(f"Generating semantic (dense) vectors for {len(texts)} movies via OpenRouter...")
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_EMBEDDINGS)
     
@@ -107,10 +103,7 @@ async def generate_dense_vectors(texts: List[str]) -> List[List[float]]:
 
 
 def generate_sparse_vectors(texts: List[str], is_seed: bool = False) -> List[Dict[str, Any]]:
-    """
-    Generates BM25 keyword vectors. 
-    Fits and saves the model if seeding; loads the model if updating.
-    """
+    """Generate BM25 keyword vectors. Fits model if seeding; otherwise loads model."""
     bm25 = BM25Encoder()
     bm25_path = "bm25_model.json"
     
@@ -126,9 +119,7 @@ def generate_sparse_vectors(texts: List[str], is_seed: bool = False) -> List[Dic
 
 
 def transform_data(raw_movies: List[Dict[str, Any]], is_seed: bool = False) -> List[Dict[str, Any]]:
-    """
-    The main orchestrator. Takes raw TMDB JSON and outputs Pinecone-ready Hybrid Vectors.
-    """
+    """Process raw TMDB movies and produce Pinecone-compatible Hybrid Vector payloads."""
     if not raw_movies:
         logger.warning("No raw movies provided to transform.")
         return []
@@ -145,16 +136,15 @@ def transform_data(raw_movies: List[Dict[str, Any]], is_seed: bool = False) -> L
     texts = [item["text_to_embed"] for item in cleaned_data]
 
     sparse_vectors = generate_sparse_vectors(texts, is_seed=is_seed)
-
     dense_vectors = asyncio.run(generate_dense_vectors(texts))
 
     pinecone_payload = []
     for i in range(len(cleaned_data)):
         record = {
             "id": cleaned_data[i]["id"],
-            "values": dense_vectors[i],               # Dense semantic embedding
-            "sparse_values": sparse_vectors[i],       # Sparse keyword embedding
-            "metadata": cleaned_data[i]["metadata"]   # Metadata for Streamlit
+            "values": dense_vectors[i],
+            "sparse_values": sparse_vectors[i],
+            "metadata": cleaned_data[i]["metadata"]
         }
         pinecone_payload.append(record)
 

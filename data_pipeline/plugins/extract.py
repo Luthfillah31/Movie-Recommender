@@ -6,17 +6,13 @@ import aiohttp
 from tenacity import retry, wait_exponential, stop_after_attempt
 from dotenv import load_dotenv
 
-# Load local .env file if it exists (for local testing)
 load_dotenv()
 
-# --- Configuration & Logging ---
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 TMDB_BASE_URL = "https://api.themoviedb.org/3"
 TMDB_API_TOKEN = os.getenv("TMDB_API_TOKEN")
-
-# Limit concurrent requests to avoid TMDB 429 Too Many Requests errors (~50/sec limit)
 MAX_CONCURRENT_REQUESTS = 40
 
 
@@ -26,7 +22,7 @@ MAX_CONCURRENT_REQUESTS = 40
     reraise=True
 )
 async def _fetch_json(session: aiohttp.ClientSession, url: str, params: Optional[Dict] = None) -> Dict[str, Any]:
-    """Base network caller with exponential backoff for resilience."""
+    """Helper to perform HTTP GET request with exponential backoff retry mechanism."""
     async with session.get(url, params=params) as response:
         if response.status == 429:
             logger.warning(f"Rate limited by TMDB on {url}. Retrying...")
@@ -35,10 +31,7 @@ async def _fetch_json(session: aiohttp.ClientSession, url: str, params: Optional
 
 
 async def fetch_popular_movie_ids(session: aiohttp.ClientSession, pages: int = 20) -> List[int]:
-    """
-    ONE-TIME USE: Extracts movie IDs from the TMDB 'popular' endpoint.
-    Used to seed the initial database.
-    """
+    """Retrieve popular movie IDs from TMDB for historical seeding."""
     logger.info(f"Extracting movie IDs from top {pages} popular pages...")
     url = f"{TMDB_BASE_URL}/movie/popular"
     
@@ -59,20 +52,16 @@ async def fetch_popular_movie_ids(session: aiohttp.ClientSession, pages: int = 2
         movie_ids.extend([movie["id"] for movie in results])
         
     unique_ids = list(set(movie_ids))
-    logger.info(f"Successfully extracted {len(unique_ids)} unique popular movie IDs.")
+    logger.info(f"Extracted {len(unique_ids)} unique popular movie IDs.")
     return unique_ids
 
 
 async def fetch_changed_movie_ids(session: aiohttp.ClientSession) -> List[int]:
-    """
-    NIGHTLY USE: Queries TMDB for all movie IDs updated in the last 24 hours.
-    Used for incremental daily updates (CDC pattern).
-    """
+    """Retrieve IDs of movies that changed in the last 24 hours."""
     logger.info("Fetching movies updated in the last 24 hours...")
     url = f"{TMDB_BASE_URL}/movie/changes"
     
     try:
-        # TMDB defaults to the last 24 hours if no date parameters are provided
         data = await _fetch_json(session, url)
         results = data.get("results", [])
         changed_ids = [movie["id"] for movie in results]
@@ -85,18 +74,14 @@ async def fetch_changed_movie_ids(session: aiohttp.ClientSession) -> List[int]:
 
 
 async def fetch_movie_details(session: aiohttp.ClientSession, movie_ids: List[int]) -> List[Dict[str, Any]]:
-    """
-    Extracts deep metadata (including credits and keywords) for a given list of movie IDs.
-    Utilizes a semaphore to gracefully handle concurrency limits.
-    """
+    """Fetch detailed metadata (including credits and keywords) for a list of movie IDs."""
     logger.info(f"Fetching detailed metadata for {len(movie_ids)} movies...")
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
     
     async def bounded_fetch(movie_id: int) -> Optional[Dict[str, Any]]:
         async with semaphore:
             url = f"{TMDB_BASE_URL}/movie/{movie_id}"
-            params = {"append_to_res"
-            "ponse": "credits,keywords"}
+            params = {"append_to_response": "credits,keywords"}
             try:
                 return await _fetch_json(session, url, params=params)
             except Exception as e:
@@ -108,13 +93,12 @@ async def fetch_movie_details(session: aiohttp.ClientSession, movie_ids: List[in
     
     valid_results = [res for res in results if res is not None]
     logger.info(f"Successfully extracted detailed metadata for {len(valid_results)} movies.")
-    
     return valid_results
 
 
 def _get_session_headers() -> Dict[str, str]:
     if not TMDB_API_TOKEN:
-        raise ValueError("Critical Error: TMDB_API_TOKEN environment variable is missing.")
+        raise ValueError("TMDB_API_TOKEN environment variable is missing.")
     return {
         "Authorization": f"Bearer {TMDB_API_TOKEN}",
         "accept": "application/json"
@@ -122,7 +106,7 @@ def _get_session_headers() -> Dict[str, str]:
 
 
 def run_historical_seed(pages: int = 20) -> List[Dict[str, Any]]:
-    """Synchronous entry point to pull massive historical data."""
+    """Synchronous entry point to extract historical data for database seeding."""
     async def _execute():
         timeout = aiohttp.ClientTimeout(total=300)
         async with aiohttp.ClientSession(headers=_get_session_headers(), timeout=timeout) as session:
@@ -135,7 +119,7 @@ def run_historical_seed(pages: int = 20) -> List[Dict[str, Any]]:
 
 
 def run_daily_update() -> List[Dict[str, Any]]:
-    """Synchronous entry point intended to be called by GitHub Actions nightly."""
+    """Synchronous entry point to run incremental nightly updates."""
     async def _execute():
         timeout = aiohttp.ClientTimeout(total=300)
         async with aiohttp.ClientSession(headers=_get_session_headers(), timeout=timeout) as session:
@@ -148,7 +132,6 @@ def run_daily_update() -> List[Dict[str, Any]]:
 
 
 if __name__ == "__main__":
-    # Local testing block
     print("Testing Daily Delta Extraction...")
     daily_data = run_daily_update()
     if daily_data:
