@@ -115,7 +115,7 @@ def generate_sparse_vectors(texts: List[str], is_seed: bool = False) -> List[Dic
         logger.info("Loading pre-fit BM25 model for incremental update...")
         bm25.load(bm25_path)
     
-    return bm25.encode_documents(texts)
+    return bm25.encode_documents(texts)  # type: ignore
 
 
 def transform_data(raw_movies: List[Dict[str, Any]], is_seed: bool = False) -> List[Dict[str, Any]]:

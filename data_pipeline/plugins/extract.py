@@ -44,7 +44,7 @@ async def fetch_popular_movie_ids(session: aiohttp.ClientSession, pages: int = 2
     
     movie_ids = []
     for data in pages_data:
-        if isinstance(data, Exception):
+        if isinstance(data, BaseException):
             logger.error(f"Failed to fetch a page of IDs: {data}")
             continue
             

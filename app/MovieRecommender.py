@@ -117,9 +117,10 @@ def retrieve_and_rerank(query: str, index: Any, bm25: BM25Encoder, pc: Pinecone,
     sparse_vec = bm25.encode_queries(query)
     
     alpha = 0.5
+    sparse_dict = sparse_vec if isinstance(sparse_vec, dict) else sparse_vec[0]
     hsparse = {
-        'indices': sparse_vec['indices'],
-        'values':  [v * (1 - alpha) for v in sparse_vec['values']]
+        'indices': sparse_dict['indices'],
+        'values':  [v * (1 - alpha) for v in sparse_dict['values']]
     }
     hdense = [v * alpha for v in dense_vec]
     
@@ -182,10 +183,14 @@ def generate_recommendations(query: str, ranked_docs: List[Dict[str, Any]], llm_
             {"role": "user", "content": user_prompt}
         ],
         response_format={"type": "json_object"},
-        temperature=0.3
+        temperature=0.3,
+        stream=False
     )
 
-    result_text = response.choices[0].message.content.strip()
+    content = response.choices[0].message.content  # type: ignore[union-attr]
+    if not content:
+        raise ValueError("Received empty response from LLM")
+    result_text = content.strip()
     if result_text.startswith("```json"):
         result_text = result_text[7:]
     elif result_text.startswith("```"):
@@ -246,10 +251,13 @@ def main():
 
     if submit_button and user_query:
         st.session_state.recommendations = None 
+        num_recs = num_recs or 3
         
         with st.spinner('Searching our vector database for the top matches...'):
             try:
-                openrouter_key = st.secrets.get("OPENROUTER_API_KEY")
+                openrouter_key = str(st.secrets.get("OPENROUTER_API_KEY", ""))
+                if not openrouter_key:
+                    raise ValueError("OPENROUTER_API_KEY is missing")
                 ranked_docs = retrieve_and_rerank(user_query, index, bm25, pc, openrouter_key, top_k=max(10, num_recs * 5))
                 
                 for doc in ranked_docs:

@@ -1,0 +1,7 @@
+{
+    "python.defaultInterpreterPath": "${workspaceFolder}/.pixi/envs/default/python.exe",
+    "python.pythonPath": "${workspaceFolder}/.pixi/envs/default/python.exe",
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}/.pixi/envs/default/Lib/site-packages"
+    ]
+}

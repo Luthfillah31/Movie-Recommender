@@ -1,0 +1,11 @@
+{
+  "venvPath": ".pixi/envs",
+  "venv": "default",
+  "exclude": [
+    ".pixi"
+  ],
+  "extraPaths": [
+    ".pixi/envs/default/Lib/site-packages",
+    "data_pipeline"
+  ]
+}
