@@ -148,8 +148,8 @@ def retrieve_and_rerank(query: str, index: Any, bm25: BM25Encoder, pc: Pinecone,
     
     return [
         {
-            "text": match.document.text,
-            "metadata": match.document.metadata,
+            "text": match.document.get("text") if isinstance(match.document, dict) else match.document.text,
+            "metadata": match.document.get("metadata") if isinstance(match.document, dict) else match.document.metadata,
             "score": match.score
         }
         for match in reranked_results.data
