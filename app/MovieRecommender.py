@@ -185,8 +185,15 @@ def generate_recommendations(query: str, ranked_docs: List[Dict[str, Any]], llm_
         temperature=0.3
     )
 
-    result_text = response.choices[0].message.content
-    return RecommendationResponse.model_validate_json(result_text)
+    result_text = response.choices[0].message.content.strip()
+    if result_text.startswith("```json"):
+        result_text = result_text[7:]
+    elif result_text.startswith("```"):
+        result_text = result_text[3:]
+    if result_text.endswith("```"):
+        result_text = result_text[:-3]
+
+    return RecommendationResponse.model_validate_json(result_text.strip())
 
 
 def get_movie_poster(title: str) -> Optional[str]:
