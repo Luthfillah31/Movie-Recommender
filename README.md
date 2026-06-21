@@ -47,7 +47,7 @@ This project implements an advanced RAG pipeline to ensure high-accuracy retriev
 ## Contact & Links
 
 * **Developer:** Luthfillah Akhtar Fakhrudin (luthfillahatar@gmail.com)
-* **Live Deployment:** [CineMate Recommender](https://movie-recommender-by-luthfillah.streamlit.app/)
+* **Live Deployment:** [CineMate Recommender](https://movie-recommender-from-tmdb.streamlit.app/)
 
 ## Acknowledgements
 
